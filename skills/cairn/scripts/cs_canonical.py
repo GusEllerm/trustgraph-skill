@@ -17,7 +17,9 @@ Bare numeric segments survive — a PubMed id names a paper, not a parameter.
 Pure stdlib, importable on python3.9+ (hook environments vary).
 """
 
+import ipaddress
 import re
+import socket
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 _VOLATILE_QUERY_PARAMS = frozenset(
@@ -136,6 +138,79 @@ def is_resolved(url: str) -> bool:
         residual.append("{id}" if _PLACEHOLDER_RE.match(v) or _UUID_RE.match(v) else v)
     rest = "/".join(residual)
     return "$" not in rest and "`" not in rest
+
+
+_NON_NETWORK_SCHEMES = frozenset({"file", "data", "blob", "about", "javascript"})
+_LOCAL_HOST_SUFFIXES = (".localhost", ".local")
+
+
+def _host_address(host):
+    """The IP a host literal denotes, or None if it's a name. `ipaddress` alone
+    misses legal shorthand — `127.1` is loopback to curl but a parse error to
+    `ip_address` — so fall back to `inet_aton`, the stack's own parser."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except (OSError, ipaddress.AddressValueError):
+        return None
+
+
+def non_ratable_reason(external_id):
+    """Why this id can't carry reputation, or None if it can. Mirrors the
+    server's `non_ratable_reason` (cairn-service, src/cairn/api/normalize.py);
+    keep the two in step.
+
+    The test is global uniqueness, not usefulness. `http://localhost:8000` is
+    a different server for every reviewer, so ratings about it pool unrelated
+    things under one entity — a wrong score, not merely a useless one. Same
+    for private-range and link-local addresses, mDNS `.local` names, and
+    `file:`/`data:` ids naming bytes on one disk.
+
+    Checking hook-side means the briefing is never built, so nothing about a
+    local dev server leaves the machine even as rater input. The server
+    refuses these too, but only after they've been sent.
+
+    Not covered: `example.com` and `.test` (reserved, but the same for every
+    reviewer) and ngrok / preview-deploy hosts (ephemeral, but globally
+    unique while they live).
+    """
+    p = urlparse(external_id)
+    scheme = p.scheme.lower()
+    if not scheme:
+        return None
+    if scheme in _NON_NETWORK_SCHEMES:
+        return "'%s:' is not a network source" % scheme
+    if scheme not in ("http", "https"):
+        return None
+
+    try:
+        host = p.hostname
+    except ValueError:
+        return "URL has an unparseable host"
+    if not host:
+        return "URL has no host"
+    if host == "localhost":
+        return "'localhost' names a different machine for every reviewer"
+
+    ip = _host_address(host)
+    if ip is not None:
+        if ip.is_loopback:
+            return "loopback addresses name a different machine for every reviewer"
+        if ip.is_link_local:
+            return "link-local addresses are not globally unique"
+        if ip.is_unspecified:
+            return "unspecified addresses name no host"
+        if ip.is_private:
+            return "private-network addresses are not globally unique"
+        return None
+
+    for suffix in _LOCAL_HOST_SUFFIXES:
+        if host.endswith(suffix):
+            return "'%s' resolves per-network, not globally" % host
+    return None
 
 
 def has_shell_syntax(url: str) -> bool:

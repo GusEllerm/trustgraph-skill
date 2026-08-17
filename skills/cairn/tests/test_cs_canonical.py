@@ -19,6 +19,7 @@ from cs_canonical import (  # noqa: E402
     canonicalize_url,
     has_shell_syntax,
     is_resolved,
+    non_ratable_reason,
 )
 
 FAILURES = []
@@ -172,6 +173,46 @@ def test_canonical_mcp_server():
     )
 
 
+def test_non_ratable_reason():
+    # Not globally unique — must be skipped before a briefing is built.
+    for url in [
+        "http://localhost:8000/v1/score",
+        "https://localhost:8443/health",
+        "http://127.0.0.1:4321/harness.html",
+        "http://127.1:8000",           # legal shorthand `ipaddress` rejects
+        "http://[::1]:8080/probe",
+        "http://192.168.1.10:3000",
+        "http://10.0.0.5/api",
+        "http://169.254.169.254/latest/meta-data",
+        "http://0.0.0.0:8000",
+        "http://printer.local/status",
+        "http://api.dev.localhost:8000/v1",
+        "file:///Users/me/notes.md",
+        "data:text/plain,hello",
+    ]:
+        check("non-ratable: %s" % url, non_ratable_reason(url) is not None)
+
+    # Globally unique — reputation on these is meaningful, so keep rating them.
+    for url in [
+        "https://api.github.com/repos/foo/bar",
+        "https://www.nexusmods.com/mods/1",
+        "mcp://cairn",
+        "tool://claude-code/web-search",
+        "agent://cairnscore",
+        # Reserved but identical for everyone; ephemeral but globally unique.
+        "https://example.com/docs",
+        "http://myservice.test/api",
+        "https://abc123.ngrok-free.app/api",
+        "https://my-app-git-branch.vercel.app",
+    ]:
+        check("ratable: %s" % url, non_ratable_reason(url) is None)
+
+    check(
+        "non-ratable: canonicalized form is caught too",
+        non_ratable_reason(canonicalize_url("http://LOCALHOST:8000/a/")) is not None,
+    )
+
+
 if __name__ == "__main__":
     for fn in [
         test_canonicalize_url,
@@ -180,6 +221,7 @@ if __name__ == "__main__":
         test_has_shell_syntax,
         test_canonicalize_capability,
         test_canonical_mcp_server,
+        test_non_ratable_reason,
     ]:
         print(fn.__name__)
         fn()

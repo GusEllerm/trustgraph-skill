@@ -15,6 +15,12 @@
 #
 # Anything else is silently skipped.
 #
+# Ids that aren't globally unique are always skipped, with no env var needed:
+# localhost, loopback / private / link-local addresses, `.local` and
+# `.localhost` names, and `file:`/`data:` ids. They'd name a different thing
+# for every reviewer, and skipping here means no briefing is built, so nothing
+# about a local service is sent anywhere. See cs_canonical.non_ratable_reason.
+#
 # Privacy / safety knobs (env):
 #   CAIRN_HOOK_ENABLED          — "0" / "false" / "no" disables this hook silently
 #                                  (default: enabled).
@@ -228,6 +234,15 @@ elif tool_name == "Bash":
         task = f"Bash network call ({_redact(url)}): {_redact(cmd)[:120]}"
 
 if entity is None:
+    sys.exit(0)
+
+# Ids that aren't globally unique — localhost, private ranges, `.local` — name
+# a different thing for every reviewer, so rating them pools this machine's dev
+# servers with everyone else's under one entity. Checked here, after all four
+# branches, so it holds for every id shape. Skipping at this point also means
+# no briefing is ever built: nothing about a local service leaves the machine,
+# not even as rater input. The server refuses these too, but only on arrival.
+if cs_canonical.non_ratable_reason(entity["external_id"]):
     sys.exit(0)
 
 req_str_full = json.dumps(tool_input) if isinstance(tool_input, (dict, list)) else str(tool_input)
