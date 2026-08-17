@@ -253,6 +253,48 @@ def test_denylist_checks_canonical_form():
     check("denylist: no briefing for denied host", proc.stdout.strip() == "", proc.stdout[:120])
 
 
+def test_non_ratable_urls_never_produce_a_briefing():
+    """localhost and friends must be dropped before the briefing exists, so
+    nothing about a local dev server reaches the rater or the queue."""
+    cases = [
+        ("WebFetch", {"url": "http://localhost:8000/scores"}),
+        ("WebFetch", {"url": "http://127.0.0.1:4399/light.html"}),
+        ("WebFetch", {"url": "http://192.168.1.50/admin"}),
+        ("Bash", {"command": "curl -s http://localhost:5280/helios.html"}),
+        ("Bash", {"command": "curl http://169.254.169.254/latest/meta-data/"}),
+    ]
+    for tool_name, tool_input in cases:
+        proc = run_hook({
+            "tool_name": tool_name,
+            "session_id": "test-hook-nonratable",
+            "tool_input": tool_input,
+            "tool_response": {"ok": True},
+        })
+        label = list(tool_input.values())[0][:48]
+        check(
+            f"non-ratable: no briefing for {label}",
+            proc.stdout.strip() == "",
+            proc.stdout[:120],
+        )
+
+
+def test_public_url_still_briefed():
+    """Guard against the skip being too broad — the common case must survive."""
+    proc = run_hook({
+        "tool_name": "WebFetch",
+        "session_id": "test-hook-ratable",
+        "tool_input": {"url": "https://api.github.com/repos/foo/bar"},
+        "tool_response": {"ok": True},
+    })
+    briefing = briefing_or_none(proc)
+    check(
+        "non-ratable: public URL still briefed",
+        briefing is not None
+        and briefing["entity"]["external_id"] == "https://api.github.com/repos/foo/bar",
+        proc.stdout[:160],
+    )
+
+
 if __name__ == "__main__":
     for fn in [
         test_bash_shell_var_url_canonicalized,
@@ -266,6 +308,8 @@ if __name__ == "__main__":
         test_websearch_harness_constant_is_folded,
         test_websearch_fail_closed_without_harness,
         test_denylist_checks_canonical_form,
+        test_non_ratable_urls_never_produce_a_briefing,
+        test_public_url_still_briefed,
     ]:
         print(fn.__name__)
         fn()

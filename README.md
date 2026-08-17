@@ -21,7 +21,7 @@ All three coexist. The Code plugin and Desktop MCP coordinate on a single key fi
 > 1. **Set rating cadence** (1-in-N) at install or via `CAIRN_HOOK_CADENCE` env. Cadence 4 → ~25% of calls rated. Higher = lower cost / lighter quota draw, but less feedback to the corpus.
 > 2. **Switch backend** to `api` with `CAIRN_RATER_BACKEND=api` + `ANTHROPIC_API_KEY` — moves to direct billing (real $) and frees your subscription quota.
 > 3. **Pick a cheaper rater model** via `CAIRN_RATER_MODEL` (default Haiku is already cheap; Sonnet/Opus draw 10× / 100× more — applies on either backend). Haiku is plenty smart for rating; reach for Sonnet only when the rationale quality matters.
-> 4. **Scope out hosts** with `CAIRN_HOOK_HOSTS_DENYLIST=internal.corp,vault.,localhost`, or disable fully with `CAIRN_HOOK_ENABLED=0`.
+> 4. **Scope out hosts** with `CAIRN_HOOK_HOSTS_DENYLIST=internal.corp,vault.`, or disable fully with `CAIRN_HOOK_ENABLED=0`. (Local addresses need no denylist entry — see below.)
 >
 > See [Data flow & privacy](#data-flow--privacy) below for the full story.
 
@@ -230,6 +230,8 @@ When the auto-rating hook fires on a tool call, here's exactly what leaves the m
 
 **Credential redaction.** Before any briefing is sent to the rater, `cs-hook-postool` strips: `Authorization:` header values (Bearer, Basic, custom schemes), `X-*-Key` / `X-*-Token` / `X-*-Auth` / `X-*-Secret` headers, URL query params (`api_key`, `access_token`, `token`, `key`, `secret`, `password`), and JSON keys with those names. The redaction is best-effort — review the rater output in `~/.cairn/hook.log` if you suspect a leak, and use the denylist below to scope-out hosts that handle credentials.
 
+**Local addresses are never rated.** `localhost`, loopback / private / link-local addresses, `.local` and `.localhost` names, and `file:` / `data:` ids are dropped before a briefing is built — so your dev servers and internal hosts are never described to the rater, let alone uploaded. This needs no configuration and can't be switched off. The reason is identity, not just privacy: `http://localhost:8000` is a different service for every reviewer, so a shared score for it would be meaningless. The Cairn API refuses these ids on write too.
+
 **Local state.** All under `~/.cairn/`, directory mode 0700, files mode 0600:
 
 | File | Contents |
@@ -245,7 +247,7 @@ When the auto-rating hook fires on a tool call, here's exactly what leaves the m
 | Env var | Effect |
 |---|---|
 | `CAIRN_HOOK_ENABLED=0` | Disable the auto-rating hook entirely. MCP tools still work; only the background loop stops. |
-| `CAIRN_HOOK_HOSTS_DENYLIST="internal.corp,vault.,localhost:5432"` | Comma-separated substring list. Skip the briefing if the URL / MCP server name contains any of them. Use to scope-out credential-handling hosts before the redaction layer is asked to do its work. |
+| `CAIRN_HOOK_HOSTS_DENYLIST="internal.corp,vault."` | Comma-separated substring list. Skip the briefing if the URL / MCP server name contains any of them. Use to scope-out credential-handling hosts before the redaction layer is asked to do its work. |
 | `CAIRN_HOOK_CADENCE=N` | Rate 1-in-N tool calls per session (default `1`). Per-session counter resets each session. Cheaper for heavy-tool sessions where every-call rating wastes tokens. |
 | `CAIRN_RATER_BACKEND=api\|claude-cli` | Pick rater backend. Plugin path defaults to `claude-cli`; `install.sh` lets you choose at install time. |
 
